@@ -2,7 +2,6 @@ import spotipy
 import sys
 import json
 import os
-import re
 import pickle
 from spotipy.oauth2 import SpotifyClientCredentials
 from youtubesearchpython import VideosSearch
@@ -26,8 +25,7 @@ except FileNotFoundError:
     print('''File credentials.json not found, please create one with the following syntax:
           {
               "client_id": "your_client_id_here",
-              "client_secret": "your_client_secret_id_here",
-              "youtube_api": "your_youtube_api_key_here"
+              "client_secret": "your_client_secret_id_here"
           }
 
           ''')
@@ -35,6 +33,7 @@ except FileNotFoundError:
 
 
 # Used this snippets for the 0auth https://gist.github.com/CoreyMSchafer/ea5e3129b81f47c7c38eb9c2e6ddcad7
+#############################################################################################################
 # token.pickle stores the user's credentials from previously successful logins
 if os.path.exists('token.pickle'):
     print('Loading Credentials From File...')
@@ -62,7 +61,7 @@ if not credentials or not credentials.valid:
         with open('token.pickle', 'wb') as f:
             print('Saving Credentials for Future Use...')
             pickle.dump(credentials, f)
-
+#############################################################################################################
 
 client_credentials_manager = SpotifyClientCredentials(client_id=cred_json.get(
     'client_id'), client_secret=cred_json.get('client_secret'))
