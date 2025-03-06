@@ -1,120 +1,121 @@
-import spotipy
-import sys
-import json
-import os
-import pickle
+import spotipy, sys, json, os, pickle
 from spotipy.oauth2 import SpotifyClientCredentials
-from youtubesearchpython import VideosSearch
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 
-credentials = None
-offset = 0
+
+def search_video(query, yt_service):
+    response = yt_service.search().list(part='snippet', maxResults=1, q=query).execute()
+    return response['items'][0]['id']['videoId'] if 'items' in response else None
 
 
-if len(sys.argv) <= 1:
-    print("Usage: playlist_transfer.py playlist_url ")
-    sys.exit()
-try:
-    with open("credentials.json", "r") as credentials:
-        cred_json = json.load(credentials)
-
-except FileNotFoundError:
-
-    print('''File credentials.json not found, please create one with the following syntax:
-          {
-              "client_id": "your_client_id_here",
-              "client_secret": "your_client_secret_id_here"
-          }
-
-          ''')
-    sys.exit()
+def load_credentials():
+    try:
+        with open("credentials.json", "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print("File credentials.json not found.")
+        sys.exit()
 
 
-# Used this snippets for the 0auth https://gist.github.com/CoreyMSchafer/ea5e3129b81f47c7c38eb9c2e6ddcad7
-#############################################################################################################
-# token.pickle stores the user's credentials from previously successful logins
-if os.path.exists('token.pickle'):
-    print('Loading Credentials From File...')
-    with open('token.pickle', 'rb') as token:
-        credentials = pickle.load(token)
-# If there are no valid credentials available, then either refresh the token or log in.
-if not credentials or not credentials.valid:
+def load_token():
+    if os.path.exists('token.pickle'):
+        with open('token.pickle', 'rb') as token:
+            return pickle.load(token)
+    return None
+
+
+def refresh_or_get_new_token(credentials):
     if credentials and credentials.expired and credentials.refresh_token:
-        print('Refreshing Access Token...')
         credentials.refresh(Request())
     else:
-        print('Fetching New Tokens...')
         flow = InstalledAppFlow.from_client_secrets_file(
-            'client_secrets.json',
-            scopes=[
-                'https://www.googleapis.com/auth/youtube'
-            ]
+            'client_secrets.json', scopes=['https://www.googleapis.com/auth/youtube']
         )
-
-        flow.run_local_server(port=8080, prompt='consent',
-                              authorization_prompt_message='')
+        flow.run_local_server(port=8080, prompt='consent')
         credentials = flow.credentials
-
-        # Save the credentials for the next run
-        with open('token.pickle', 'wb') as f:
-            print('Saving Credentials for Future Use...')
-            pickle.dump(credentials, f)
-#############################################################################################################
-
-client_credentials_manager = SpotifyClientCredentials(client_id=cred_json.get(
-    'client_id'), client_secret=cred_json.get('client_secret'))
-sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
-
-yt_service = build('youtube', 'v3', credentials=credentials)
-
-playlist_name = sp.playlist(sys.argv[1], fields='name').get('name')
-playlist_desc = sp.playlist(
-    sys.argv[1], fields='description').get('description')
+        with open('token.pickle', 'wb') as token:
+            pickle.dump(credentials, token)
+    return credentials
 
 
-playlists_insert_response = yt_service.playlists().insert(
-    part='snippet,status',
-    body={
-        "snippet": {
-            "title": playlist_name,
-            "description": playlist_desc
-        },
-        "status": {
-            "privacyStatus": "private"
-        }}
-).execute()
+def get_spotify_playlist_info(playlist_url, sp):
+    playlist_name = sp.playlist(playlist_url, fields='name').get('name')
+    playlist_desc = sp.playlist(playlist_url, fields='description').get('description')
+    return playlist_name, playlist_desc
 
 
-playlist_id = playlists_insert_response["id"]
-total = sp.playlist_items(sys.argv[1], fields='total').get('total')
+def create_youtube_playlist(yt_service, playlist_name, playlist_desc):
+    return yt_service.playlists().insert(
+        part='snippet,status',
+        body={
+            "snippet": {"title": playlist_name, "description": playlist_desc},
+            "status": {"privacyStatus": "private"}
+        }
+    ).execute()
 
 
-while offset < total:
-    if offset == total:
-        break
-    # Get artist name and song name using the spotify API
-
-    artist = sp.playlist_items(sys.argv[1], offset=offset, fields='items.track.artists.name').get(
-        'items')[0].get('track').get('artists')[0].get('name')
-    song_name = sp.playlist_items(sys.argv[1], offset=offset, fields='items.track.name').get(
-        'items')[0].get('track').get('name')
-    video_id = VideosSearch(f"{artist} {song_name}",
-                            limit=1).result().get('result')[0].get('id')
-
-    print(f"Adding {artist} {song_name} to playlist...")
-    playlist_add_response = yt_service.playlistItems().insert(
+def add_video_to_playlist(yt_service, playlist_id, video_id):
+    yt_service.playlistItems().insert(
         part="snippet",
         body={
             "snippet": {
                 "playlistId": playlist_id,
-                "resourceId": {
-                    "kind": "youtube#video",
-                    "videoId": video_id
-                }
+                "resourceId": {"kind": "youtube#video", "videoId": video_id}
             }
         }
     ).execute()
 
-    offset += 1
+
+def check_if_video_exists_in_playlist(yt_service, playlist_id, video_id):
+    response = yt_service.playlistItems().list(
+        part="snippet",
+        playlistId=playlist_id,
+        maxResults=50  # Set a limit for the number of results per request (adjust as needed)
+    ).execute()
+
+    # Check if the video is already in the playlist
+    for item in response['items']:
+        if item['snippet']['resourceId']['videoId'] == video_id:
+            return True
+    return False
+
+
+def main():
+    if len(sys.argv) <= 1:
+        print("Usage: playlist_transfer.py playlist_url ")
+        sys.exit()
+
+    credentials_data = load_credentials()
+
+    sp = spotipy.Spotify(client_credentials_manager=SpotifyClientCredentials(
+        client_id=credentials_data.get('client_id'), client_secret=credentials_data.get('client_secret')
+    ))
+
+    token = load_token()
+    credentials = refresh_or_get_new_token(token)
+
+    yt_service = build('youtube', 'v3', credentials=credentials)
+
+    playlist_name, playlist_desc = get_spotify_playlist_info(sys.argv[1], sp)
+    playlist = create_youtube_playlist(yt_service, playlist_name, playlist_desc)
+    playlist_id = playlist["id"]
+
+    total_tracks = sp.playlist_items(sys.argv[1], fields='total').get('total')
+    for offset in range(total_tracks):
+        artist = sp.playlist_items(sys.argv[1], offset=offset, fields='items.track.artists.name').get(
+            'items')[0].get('track').get('artists')[0].get('name')
+        song_name = sp.playlist_items(sys.argv[1], offset=offset, fields='items.track.name').get(
+            'items')[0].get('track').get('name')
+
+        video_id = search_video(f"{artist} {song_name}", yt_service)
+
+        if video_id:
+            # Check if the video is already added to the playlist
+            if not check_if_video_exists_in_playlist(yt_service, playlist_id, video_id):
+                add_video_to_playlist(yt_service, playlist_id, video_id)
+
+
+if __name__ == "__main__":
+    main()
