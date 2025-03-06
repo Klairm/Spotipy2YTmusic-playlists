@@ -8,7 +8,7 @@ All the requirements are listed in the requirements.txt, use `python3 -m pip ins
 
 ## Credentials
 
-Credentials are needed in a separate file named `credentials.json` following this structure:
+Spotify Credentials are needed in a separate file named `credentials.json` following this structure:
 
 ```
 {
@@ -16,7 +16,7 @@ Credentials are needed in a separate file named `credentials.json` following thi
     "client_secret":"your_client_secret_id_here"
 }
 ```
-Also 0auth is needed from google API, for more info visit [this link](https://developers.google.com/identity/protocols/oauth2)
+Also `client_secrets.json` is neeed which is taken from youtube API,for more info visit [this link](https://developers.google.com/identity/protocols/oauth2)
 
 ## Syntax:
 
