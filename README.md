@@ -1,6 +1,6 @@
 ## Spotipy2YTMusic Playlists
 
-Dirty and quick script in Python to transfer Spotify playlists to Youtube Playlists, [used old code as base](https://github.com/Klairm/spotipy-downloader).
+Dirty and quick script in Python to transfer Spotify playlists to Youtube Playlists
 
 ## Requirements
 
@@ -21,6 +21,7 @@ Also `client_secrets.json` is neeed which is taken from youtube API,for more inf
 ## Syntax:
 
 ```
-	python3 playlist_transfer.py [playlist_url]
+	python3 playlist_transfer.py [playlist_url] [youtube_playlist_id] 
 
 ```
+The `youtube_playlist_id` is optional
