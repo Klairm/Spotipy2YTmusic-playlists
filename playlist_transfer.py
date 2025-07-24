@@ -4,11 +4,29 @@ import json
 import os
 import pickle
 import sqlite3
-from spotipy.oauth2 import SpotifyClientCredentials
+from spotipy.oauth2 import SpotifyClientCredentials, SpotifyPKCE
+
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 
+
+
+def getUserToken():
+    print("User auth is needed when transfering liked songs, check your default browser.")
+    credentials_data = load_credentials()
+    
+    sig = SpotifyPKCE(client_id=credentials_data.get('client_id'),scope="user-library-read",redirect_uri="http://localhost:8080/")
+    user_token = sig.get_access_token()
+    # with open('token_sp.pickle', 'wb') as token:
+    #     pickle.dump(user_token, token)
+
+    return user_token
+    
+    
+    
+    
+    
 # Set up the SQLite database
 def setup_db():
     conn = sqlite3.connect('video_cache.db')
@@ -32,8 +50,17 @@ def cache_video(cursor, artist, song_name, video_id):
     cursor.connection.commit()
 
 def search_video(query, yt_service):
-    response = yt_service.search().list(part='snippet', maxResults=1, q=query).execute()
-    return response['items'][0]['id']['videoId'] if 'items' in response else None
+    response = yt_service.search().list(
+        part='id',
+        maxResults=1,
+        q=query,
+        type='video'
+    ).execute()
+
+    items = response.get('items', [])
+    if items and 'videoId' in items[0]['id']:
+        return items[0]['id']['videoId']
+    return None
 
 def load_credentials():
     try:
@@ -47,11 +74,13 @@ def load_token():
     if os.path.exists('token.pickle'):
         with open('token.pickle', 'rb') as token:
             return pickle.load(token)
-    return None
+    return False
 
 def refresh_or_get_new_token(credentials):
+    print(credentials)
     if credentials and credentials.expired and credentials.refresh_token:
         credentials.refresh(Request())
+        
     else:
         flow = InstalledAppFlow.from_client_secrets_file(
             'client_secrets.json', scopes=['https://www.googleapis.com/auth/youtube']
@@ -61,6 +90,25 @@ def refresh_or_get_new_token(credentials):
         with open('token.pickle', 'wb') as token:
             pickle.dump(credentials, token)
     return credentials
+
+
+def get_all_playlist_video_ids(yt_service, playlist_id):
+    video_ids = set()
+    nextPageToken = None
+    while True:
+        response = yt_service.playlistItems().list(
+            part="snippet",
+            playlistId=playlist_id,
+            maxResults=50,
+            pageToken=nextPageToken
+        ).execute()
+        for item in response['items']:
+            video_ids.add(item['snippet']['resourceId']['videoId'])
+        nextPageToken = response.get('nextPageToken')
+        if not nextPageToken:
+            break
+    return video_ids
+
 
 def get_spotify_playlist_info(playlist_url, sp):
     playlist_name = sp.playlist(playlist_url, fields='name').get('name')
@@ -107,18 +155,23 @@ def main():
 
     credentials_data = load_credentials()
 
-    sp = spotipy.Spotify(client_credentials_manager=SpotifyClientCredentials(
-        client_id=credentials_data.get('client_id'), client_secret=credentials_data.get('client_secret')
-    ))
+    credentials = SpotifyClientCredentials(client_id=credentials_data.get('client_id'), client_secret=credentials_data.get('client_secret'))
+    sp = spotipy.Spotify(client_credentials_manager=credentials,auth_manager=credentials)
 
     token = load_token()
     credentials = refresh_or_get_new_token(token)
 
     yt_service = build('youtube', 'v3', credentials=credentials)
+    likedSongs = True if sys.argv[1] == "0" else False
 
-    playlist_name, playlist_desc = get_spotify_playlist_info(sys.argv[1], sp)
+    if not likedSongs:
+        playlist_name, playlist_desc = get_spotify_playlist_info(sys.argv[1], sp)
+    else:
+        getUserToken()
+        print(sp.current_user_saved_tracks())
+        
     playlist_id = 0
-    yt_id = sys.argv[2] if len(sys.argv) >= 2 else False
+    yt_id = sys.argv[2] if len(sys.argv) >= 3 else False
     if yt_id != False:
         print(f"Using provided YouTube ID: {yt_id}")
         playlist_id = yt_id
@@ -129,6 +182,8 @@ def main():
         playlist_id = playlist["id"]
 
     conn, cursor = setup_db()
+
+    existing_video_ids = get_all_playlist_video_ids(yt_service, playlist_id)
 
     total_tracks = sp.playlist_items(sys.argv[1], fields='total').get('total')
     for offset in range(total_tracks):
@@ -148,11 +203,11 @@ def main():
                 # Cache the result
                 cache_video(cursor, artist, song_name, video_id)
                 
-        if video_id:
-            # Check if the video is already added to the playlist
-            if not check_if_video_exists_in_playlist(yt_service, playlist_id, video_id):
-                print("adding track")
-                add_video_to_playlist(yt_service, playlist_id, video_id)
+        if video_id not in existing_video_ids:
+
+            print("adding track")
+            add_video_to_playlist(yt_service, playlist_id, video_id)
+            existing_video_ids.add(video_id)
 
     # Close the database connection
     conn.close()
