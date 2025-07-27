@@ -1,3 +1,4 @@
+import time
 import spotipy
 import sys
 import json
@@ -18,8 +19,9 @@ def getUserToken():
     
     sig = SpotifyPKCE(client_id=credentials_data.get('client_id'),scope="user-library-read",redirect_uri="http://localhost:8080/")
     user_token = sig.get_access_token()
-    # with open('token_sp.pickle', 'wb') as token:
-    #     pickle.dump(user_token, token)
+
+    with open('token_sp.pickle', 'wb') as token:
+        pickle.dump(user_token, token)
 
     return user_token
     
@@ -74,10 +76,12 @@ def load_token():
     if os.path.exists('token.pickle'):
         with open('token.pickle', 'rb') as token:
             return pickle.load(token)
-    return False
+    return None
 
 def refresh_or_get_new_token(credentials):
-    print(credentials)
+
+    if credentials and credentials.valid:
+        return credentials
     if credentials and credentials.expired and credentials.refresh_token:
         credentials.refresh(Request())
         
@@ -135,7 +139,7 @@ def add_video_to_playlist(yt_service, playlist_id, video_id):
         }
     ).execute()
 
-def check_if_video_exists_in_playlist(yt_service, playlist_id, video_id):
+def check_if_video_exists_in_playlist(yt_service, playlist_id, trackInfo):
     response = yt_service.playlistItems().list(
         part="snippet",
         playlistId=playlist_id,
@@ -163,12 +167,17 @@ def main():
 
     yt_service = build('youtube', 'v3', credentials=credentials)
     likedSongs = True if sys.argv[1] == "0" else False
-
+    
     if not likedSongs:
         playlist_name, playlist_desc = get_spotify_playlist_info(sys.argv[1], sp)
+        total_tracks = sp.playlist_items(sys.argv[1], fields='total').get('total')
     else:
         getUserToken()
-        print(sp.current_user_saved_tracks())
+        playlist_name = "Liked Songs"
+        playlist_desc = "Liked Songs from Spotify"
+        likedTracks = sp.current_user_saved_tracks()
+        total_tracks = likedTracks.get('total')
+
         
     playlist_id = 0
     yt_id = sys.argv[2] if len(sys.argv) >= 3 else False
@@ -185,12 +194,15 @@ def main():
 
     existing_video_ids = get_all_playlist_video_ids(yt_service, playlist_id)
 
-    total_tracks = sp.playlist_items(sys.argv[1], fields='total').get('total')
+
     for offset in range(total_tracks):
-        artist = sp.playlist_items(sys.argv[1], offset=offset, fields='items.track.artists.name').get(
-            'items')[0].get('track').get('artists')[0].get('name')
-        song_name = sp.playlist_items(sys.argv[1], offset=offset, fields='items.track.name').get(
-            'items')[0].get('track').get('name')
+        if not likedSongs:
+            
+            artist = sp.playlist_items(sys.argv[1], offset=offset, fields='items.track.artists.name').get('items')[0].get('track').get('artists')[0].get('name')
+            song_name = sp.playlist_items(sys.argv[1], offset=offset, fields='items.track.name').get('items')[0].get('track').get('name')
+        else:
+            artist = sp.current_user_saved_tracks(offset=offset).get('items')[0].get('track').get('artists')[0].get('name')
+            song_name = sp.current_user_saved_tracks(offset=offset).get('items')[0].get('track').get('name')
 
         print(song_name)
         # Try to get cached video ID
@@ -207,6 +219,7 @@ def main():
 
             print("adding track")
             add_video_to_playlist(yt_service, playlist_id, video_id)
+            time.sleep(1)
             existing_video_ids.add(video_id)
 
     # Close the database connection
