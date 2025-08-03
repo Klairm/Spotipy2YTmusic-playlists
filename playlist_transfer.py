@@ -1,3 +1,4 @@
+from datetime import datetime
 import time
 import spotipy
 import sys
@@ -6,7 +7,7 @@ import os
 import pickle
 import sqlite3
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyPKCE
-
+from googleapiclient.errors import HttpError
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -193,35 +194,80 @@ def main():
     conn, cursor = setup_db()
 
     existing_video_ids = get_all_playlist_video_ids(yt_service, playlist_id)
-
-
-    for offset in range(total_tracks):
-        if not likedSongs:
+    try:
+        for offset in range(total_tracks):
+            cursor.execute("SELECT offsetP FROM  trackingOffset  ORDER BY dateP DESC LIMIT 1")
+            result = cursor.fetchone()
             
-            artist = sp.playlist_items(sys.argv[1], offset=offset, fields='items.track.artists.name').get('items')[0].get('track').get('artists')[0].get('name')
-            song_name = sp.playlist_items(sys.argv[1], offset=offset, fields='items.track.name').get('items')[0].get('track').get('name')
-        else:
-            artist = sp.current_user_saved_tracks(offset=offset).get('items')[0].get('track').get('artists')[0].get('name')
-            song_name = sp.current_user_saved_tracks(offset=offset).get('items')[0].get('track').get('name')
 
-        print(song_name)
-        # Try to get cached video ID
-        cached_video_id = get_cached_video_id(cursor, artist, song_name)
-        if cached_video_id:
-            video_id = cached_video_id
-        else:
-            video_id = search_video(f"{artist} {song_name}", yt_service)
-            if video_id:
-                # Cache the result
-                cache_video(cursor, artist, song_name, video_id)
+            if result:
+                print(result[0])
+                offset = result[0]
+
+            if(offset >= total_tracks):
+                print("Completed playlist transfer! ")
+                break
+            if not likedSongs:
+                artist = sp.playlist_items(sys.argv[1], offset=offset, fields='items.track.artists.name').get('items')[0].get('track').get('artists')[0].get('name')
+                song_name = sp.playlist_items(sys.argv[1], offset=offset, fields='items.track.name').get('items')[0].get('track').get('name')
+            else:
+                track_data = sp.current_user_saved_tracks(offset=offset).get('items')
+            
+                if not track_data:
+                    offset += 1
+                    cursor.execute("INSERT OR REPLACE INTO trackingOffset (offsetP,dateP) VALUES (?, ?)", (offset, datetime.now()))
+                    cursor.connection.commit()
+                    continue
                 
-        if video_id not in existing_video_ids:
+                track = track_data[0].get('track')
+                if not track:
+                    offset += 1
+                    cursor.execute("INSERT OR REPLACE INTO trackingOffset (offsetP,dateP) VALUES (?, ?)", (offset, datetime.now()))
+                    cursor.connection.commit()
+                    continue
 
-            print("adding track")
-            add_video_to_playlist(yt_service, playlist_id, video_id)
-            time.sleep(1)
-            existing_video_ids.add(video_id)
+                artist_info = track.get('artists')
+                if not artist_info:
+                    offset += 1
+                    cursor.execute("INSERT OR REPLACE INTO trackingOffset (offsetP,dateP) VALUES (?, ?)", (offset, datetime.now()))
+                    cursor.connection.commit()
+                    continue
+                
+                artist = artist_info[0].get('name')
+                song_name = track.get('name')
 
+
+            print(artist_name,song_name)
+
+            
+            cached_video_id = get_cached_video_id(cursor, artist, song_name)
+            if cached_video_id:
+                video_id = cached_video_id
+            else:
+                video_id = search_video(f"{artist} {song_name}", yt_service)
+                if video_id:
+                    cache_video(cursor, artist, song_name, video_id)
+
+            if video_id not in existing_video_ids and video_id is not None:
+                print("adding track")
+                print(f"Video ID: {video_id}")
+                print(f"Playlist ID: {playlist_id}")
+
+                add_video_to_playlist(yt_service, playlist_id, video_id)
+                time.sleep(1)
+                existing_video_ids.add(video_id)
+            offset += 1
+            cursor.execute("INSERT OR REPLACE INTO trackingOffset (offsetP,dateP) VALUES (?, ?)", (offset, datetime.now()))
+            cursor.connection.commit()
+          
+    except HttpError as e:
+        
+        print(str(e))
+        cursor.execute("INSERT OR REPLACE INTO trackingOffset (offsetP,dateP) VALUES (?, ?)",
+                   (offset, datetime.now()))
+        cursor.connection.commit()
+        
+        
     # Close the database connection
     conn.close()
 
