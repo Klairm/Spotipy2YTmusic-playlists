@@ -13,6 +13,9 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 
 
+def cacheOffset(cursor,offset):
+    cursor.execute("INSERT OR REPLACE INTO trackingOffset (offsetP,dateP) VALUES (?, ?)", (offset, datetime.now()))
+    cursor.connection.commit()
 
 def getUserToken():
     print("User auth is needed when transfering liked songs, check your default browser.")
@@ -26,9 +29,7 @@ def getUserToken():
 
     return user_token
     
-    
-    
-    
+   
     
 # Set up the SQLite database
 def setup_db():
@@ -215,22 +216,19 @@ def main():
             
                 if not track_data:
                     offset += 1
-                    cursor.execute("INSERT OR REPLACE INTO trackingOffset (offsetP,dateP) VALUES (?, ?)", (offset, datetime.now()))
-                    cursor.connection.commit()
+                    cacheOffset(cursor,offset)
                     continue
                 
                 track = track_data[0].get('track')
                 if not track:
                     offset += 1
-                    cursor.execute("INSERT OR REPLACE INTO trackingOffset (offsetP,dateP) VALUES (?, ?)", (offset, datetime.now()))
-                    cursor.connection.commit()
+                    cacheOffset(cursor,offset)
                     continue
 
                 artist_info = track.get('artists')
                 if not artist_info:
                     offset += 1
-                    cursor.execute("INSERT OR REPLACE INTO trackingOffset (offsetP,dateP) VALUES (?, ?)", (offset, datetime.now()))
-                    cursor.connection.commit()
+                    cacheOffset(cursor,offset)
                     continue
                 
                 artist = artist_info[0].get('name')
@@ -257,8 +255,7 @@ def main():
                 time.sleep(1)
                 existing_video_ids.add(video_id)
             offset += 1
-            cursor.execute("INSERT OR REPLACE INTO trackingOffset (offsetP,dateP) VALUES (?, ?)", (offset, datetime.now()))
-            cursor.connection.commit()
+            cacheOffset(cursor,offset)
           
     except HttpError as e:
         
